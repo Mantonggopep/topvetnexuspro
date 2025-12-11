@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Vet Nexus Pro</title>
+    
+    <!-- PWA / Mobile Tags -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/favicon.ico">
+    
+    <script src="https://checkout.flutterwave.com/v3.js"></script>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/",
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+        "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+        "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+        "fastify": "https://aistudiocdn.com/fastify@^5.6.2",
+        "jsonwebtoken": "https://aistudiocdn.com/jsonwebtoken@^9.0.2",
+        "@prisma/client": "https://aistudiocdn.com/@prisma/client@^7.0.1",
+        "@fastify/cors": "https://aistudiocdn.com/@fastify/cors@^11.1.0",
+        "@fastify/cookie": "https://aistudiocdn.com/@fastify/cookie@^11.0.2",
+        "@fastify/helmet": "https://aistudiocdn.com/@fastify/helmet@^13.0.2",
+        "bcryptjs": "https://aistudiocdn.com/bcryptjs@^3.0.3",
+        "os": "https://aistudiocdn.com/os@^0.1.2",
+        "axios": "https://aistudiocdn.com/axios@^1.13.2",
+        "vite": "https://aistudiocdn.com/vite@^7.2.4",
+        "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
+      }
+    }
+    </script>
+    <link rel="stylesheet" href="/index.css">
+  </head>
+  <body class="bg-slate-50 text-slate-800 font-sans antialiased overflow-hidden tracking-tight">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Plan {
+  id           String @id
+  name         String
+  priceMonthly Float
+  priceYearly  Float
+  features     String
+  limits       String
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      String
+  action    String
+  type      String
+  details   String?
+  timestamp DateTime @default(now())
+}
+
+model Tenant {
+  id            String   @id @default(uuid())
+  parentId      String?
+  name          String
+  plan          String   @default("Trial")
+  billingPeriod String   @default("Monthly")
+  settings      String   @default("{\"currency\":\"USD\",\"timezone\":\"UTC\"}")
+  status        String   @default("Active")
+  joinedDate    DateTime @default(now())
+  storageUsed   Float    @default(0)
+
+  users         User[]
+  owners        Owner[]
+  pets          Pet[]
+  appointments  Appointment[]
+  inventory     InventoryItem[]
+  sales         SaleRecord[]
+  consultations Consultation[]
+  labResults    LabResult[]
+  expenses      Expense[]
+  logs          Log[]
+  messages      Message[]
+  clientUploads ClientUpload[]
+}
+
+model User {
+  id           String  @id @default(uuid())
+  tenantId     String
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String  @unique
+  passwordHash String
+  roles        String  @default("[\"Veterinarian\"]")
+  avatarUrl    String?
+  isSuspended  Boolean @default(false)
+  isVerified   Boolean @default(false) 
+}
+
+model VerificationToken {
+  id         String   @id @default(uuid())
+  identifier String
+  token      String
+  type       String
+  expires    DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([identifier, type])
+}
+
+model Owner {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientNumber String?  @default("CL-000")
+  name         String
+  email        String?
+  phone        String
+  address      String?
+  
+  // CLIENT PORTAL FEATURES
+  passwordHash   String?  // Allows client to log in
+  isPortalActive Boolean  @default(false) // Toggle access
+  lastLogin      DateTime?
+
+  createdAt    DateTime @default(now())
+
+  pets         Pet[]
+  appointments Appointment[]
+  consultations Consultation[]
+  
+  // NEW RELATIONS
+  sales         SaleRecord[]
+  messages      Message[]
+  uploads       ClientUpload[]
+}
+
+model Pet {
+  id                String   @id @default(uuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId           String
+  owner             Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  name              String
+  species           String
+  breed             String?
+  age               Float    @default(0)
+  gender            String
+  type              String   @default("Single")
+  color             String?
+  imageUrl          String?
+
+  vitalsHistory     String   @default("[]")
+  notes             String   @default("[]")
+  allergies         String   @default("[]")
+  medicalConditions String   @default("[]")
+  reminders         String   @default("[]")
+  vaccinations      String   @default("[]")
+
+  createdAt         DateTime @default(now())
+
+  appointments      Appointment[]
+  consultations     Consultation[]
+  labResults        LabResult[]
+}
+
+model Appointment {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  petId      String?
+  pet        Pet?     @relation(fields: [petId], references: [id])
+  ownerId    String?
+  owner      Owner?   @relation(fields: [ownerId], references: [id])
+  walkInName String?
+  date       DateTime
+  reason     String
+  status     String   @default("Scheduled")
+  doctorName String?
+}
+
+model Consultation {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  petId               String
+  pet                 Pet      @relation(fields: [petId], references: [id])
+  ownerId             String
+  owner               Owner    @relation(fields: [ownerId], references: [id])
+
+  date                DateTime @default(now())
+  vetName             String
+  status              String   @default("Draft")
+
+  chiefComplaint      String?
+  history             String?
+  previousTreatmentId String?
+  previousDiagnosis   String?
+  plan                String?
+
+  vitals              String   @default("{}")
+  exam                String   @default("{}")
+  diagnosis           String   @default("{}")
+  labRequests         String   @default("[]")
+  prescription        String   @default("[]")
+  attachments         String   @default("[]")
+  reminder            String   @default("{}")
+  financials          String   @default("{}")
+}
+
+model LabResult {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  petId          String?
+  pet            Pet?      @relation(fields: [petId], references: [id])
+  patientName    String?
+  ownerName      String?
+  consultationId String?
+  testName       String
+  requestDate    DateTime  @default(now())
+  completionDate DateTime?
+  status         String    @default("Pending")
+  result         String?
+  resultUrl      String?
+  notes          String?
+  requestedBy    String?
+  conductedBy    String?
+  cost           Float     @default(0)
+}
+
+model InventoryItem {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  category       String
+  type           String    @default("Product")
+  sku            String
+  stock          Int       @default(0)
+  purchasePrice  Float     @default(0)
+  retailPrice    Float     @default(0)
+  wholesalePrice Float     @default(0)
+  reorderLevel   Int       @default(5)
+  expiryDate     String?
+  
+  unit           String?   @default("pcs")
+  location       String?
+  batchNumber    String?
+  supplier       String?
+}
+
+model SaleRecord {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Linked Owner (for Portal History)
+  ownerId       String?
+  owner         Owner?   @relation(fields: [ownerId], references: [id])
+
+  clientId      String?
+  clientName    String?
+  clientAddress String?
+  clientEmail   String?
+  clientPhone   String?
+  date          DateTime @default(now())
+
+  items         String   @default("[]")
+  payments      String   @default("[]")
+
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  total         Float    @default(0)
+
+  status        String   @default("Pending")
+  invoiceNumber String?
+  receiptNumber String?
+  notes         String?
+}
+
+model Expense {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date          DateTime @default(now())
+  category      String
+  description   String
+  amount        Float
+  paymentMethod String
+  notes         String?
+}
+
+// NEW MODELS FOR CLIENT PORTAL
+
+model Message {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Context
+  ownerId   String
+  owner     Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  // Who sent it?
+  senderType String  // "Staff" or "Client"
+  senderId   String  // UserId or OwnerId (Client)
+  
+  content    String
+  isRead     Boolean @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model ClientUpload {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId   String
+  owner     Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  fileName  String
+  fileUrl   String
+  fileType  String   // "Receipt", "Image", "Other"
+  uploadedAt DateTime @default(now())
+  notes     String?
+}

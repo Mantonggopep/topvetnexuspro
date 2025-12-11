@@ -1,0 +1,408 @@
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { prisma } from './lib/prisma';
+
+// --- CONFIGURATION ---
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-change-me';
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
+
+// --- TYPES (for Type Safety) ---
+interface AuthenticatedUser {
+  id: string;
+  tenantId: string;
+  roles: string[];
+  name: string;
+}
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: AuthenticatedUser;
+  }
+}
+
+// --- HELPER: Safe JSON Parser ---
+// Handles Prisma fields stored as Strings (e.g., "[]") to prevent crashes
+const safeParse = (data: string | null | undefined, fallback: any = []) => {
+  if (!data) return fallback;
+  try { return JSON.parse(data); } catch { return fallback; }
+};
+
+// --- HELPER: Internal Logger (Replaces external utils to prevent import errors) ---
+async function createLog(tenantId: string, user: string, action: string, type: string, details?: string) {
+  try {
+    await prisma.log.create({
+      data: { tenantId, user, action, type, details: details || '' }
+    });
+  } catch (e) { console.error("Log failed:", e); }
+}
+
+// =================================================================
+// MAIN ROUTES FUNCTION
+// =================================================================
+export async function appRoutes(app: FastifyInstance) {
+
+  // =================================================================
+  // 1. PUBLIC ROUTES (Auth, Webhooks, Public Info)
+  // =================================================================
+
+  // --- STAFF LOGIN ---
+  app.post('/auth/login', async (req: FastifyRequest<{ Body: { email: string, password: string } }>, reply) => {
+    const { email, password } = req.body;
+    try {
+      const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
+      if (!user) return reply.code(401).send({ error: 'Invalid credentials' });
+
+      const isValid = await bcrypt.compare(password, user.passwordHash);
+      if (!isValid) return reply.code(401).send({ error: 'Invalid credentials' });
+
+      if (user.isSuspended) return reply.code(403).send({ error: 'Account suspended' });
+
+      const roles = safeParse(user.roles, ['Veterinarian']);
+      const token = jwt.sign({ userId: user.id, tenantId: user.tenantId, roles }, JWT_SECRET, { expiresIn: '7d' });
+
+      reply.setCookie('token', token, { path: '/', httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+      return { success: true, token, user: { ...user, roles }, tenant: user.tenant };
+    } catch (e) { return reply.code(500).send({ error: 'Login failed' }); }
+  });
+
+  // --- LOGOUT ---
+  app.post('/auth/logout', async (req, reply) => {
+    reply.clearCookie('token', { path: '/' });
+    return { success: true };
+  });
+
+  // --- CLIENT PORTAL LOGIN (Owners) ---
+  app.post('/portal/login', async (req: FastifyRequest<{ Body: { email?: string, phone?: string, password: string } }>, reply) => {
+    const { email, phone, password } = req.body;
+    try {
+      const owner = await prisma.owner.findFirst({
+        where: { OR: [{ email: email || undefined }, { phone: phone || undefined }] }
+      });
+
+      if (!owner || !owner.isPortalActive || !owner.passwordHash) {
+        return reply.code(403).send({ error: 'Portal access invalid or disabled.' });
+      }
+
+      const isValid = await bcrypt.compare(password, owner.passwordHash);
+      if (!isValid) return reply.code(401).send({ error: 'Invalid credentials' });
+
+      // Special Token for Clients
+      const token = jwt.sign(
+        { userId: owner.id, tenantId: owner.tenantId, type: 'CLIENT', name: owner.name },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      reply.setCookie('client_token', token, { path: '/', httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+      return { success: true, token, user: { id: owner.id, name: owner.name } };
+    } catch (e) { return reply.code(500).send({ error: 'Portal login failed' }); }
+  });
+
+  // =================================================================
+  // 2. CLIENT PORTAL ROUTES (Protected for Owners)
+  // =================================================================
+  app.register(async (portal) => {
+    portal.addHook('preHandler', async (req, reply) => {
+      try {
+        const token = req.cookies.client_token || (req.headers.authorization as string)?.replace('Bearer ', '');
+        if (!token) throw new Error('No token');
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        if (decoded.type !== 'CLIENT') throw new Error('Invalid token type');
+        req.user = { id: decoded.userId, tenantId: decoded.tenantId, roles: ['Client'], name: decoded.name };
+      } catch (err) { return reply.code(401).send({ error: 'Portal Unauthorized' }); }
+    });
+
+    // Portal Dashboard
+    portal.get('/portal/dashboard', async (req) => {
+      const ownerId = req.user!.id;
+      const [pets, appointments, invoices] = await Promise.all([
+        prisma.pet.findMany({ where: { ownerId } }),
+        prisma.appointment.findMany({ where: { ownerId }, orderBy: { date: 'desc' }, take: 5 }),
+        prisma.saleRecord.findMany({ where: { ownerId }, orderBy: { date: 'desc' }, take: 5 })
+      ]);
+      return { pets, appointments, invoices };
+    });
+
+    // Book Appointment (Client)
+    portal.post('/portal/appointments', async (req: FastifyRequest<{ Body: any }>) => {
+      return prisma.appointment.create({
+        data: {
+          tenantId: req.user!.tenantId,
+          ownerId: req.user!.id,
+          petId: req.body.petId,
+          date: new Date(req.body.date),
+          reason: req.body.reason,
+          status: 'Scheduled',
+          doctorName: 'Pending'
+        }
+      });
+    });
+  }); // End Portal
+
+  // =================================================================
+  // 3. STAFF PROTECTED ROUTES (Veterinarians/Admins)
+  // =================================================================
+  app.register(async (api) => {
+    // --- AUTH MIDDLEWARE ---
+    api.addHook('preHandler', async (req, reply) => {
+      try {
+        const token = req.cookies.token || (req.headers.authorization as string)?.replace('Bearer ', '');
+        if (!token) throw new Error('Missing token');
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        req.user = { id: decoded.userId, tenantId: decoded.tenantId, roles: decoded.roles, name: 'Staff' }; 
+        
+        // Fetch real name if needed, but skipping for performance
+      } catch (err) { return reply.code(401).send({ error: 'Unauthorized' }); }
+    });
+
+    // -------------------------
+    // A. CURRENT USER
+    // -------------------------
+    api.get('/auth/me', async (req) => {
+      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, include: { tenant: true } });
+      if (!user) throw new Error('User not found');
+      return { ...user, roles: safeParse(user.roles) };
+    });
+
+    // -------------------------
+    // B. DASHBOARD & STATS
+    // -------------------------
+    api.get('/stats/dashboard', async (req) => {
+        const tenantId = req.user!.tenantId;
+        const [clients, patients, revenue, appointments] = await Promise.all([
+            prisma.owner.count({ where: { tenantId } }),
+            prisma.pet.count({ where: { tenantId } }),
+            prisma.saleRecord.aggregate({ where: { tenantId }, _sum: { total: true } }),
+            prisma.appointment.count({ where: { tenantId, date: { gte: new Date() } } })
+        ]);
+        return { clients, patients, revenue: revenue._sum.total || 0, appointments };
+    });
+
+    // -------------------------
+    // C. PATIENTS (PETS)
+    // -------------------------
+    api.get('/patients', async (req) => {
+        const patients = await prisma.pet.findMany({
+            where: { tenantId: req.user!.tenantId },
+            include: { owner: { select: { name: true, phone: true } } },
+            orderBy: { createdAt: 'desc' },
+            take: 100
+        });
+        // Parse JSON strings for frontend
+        return patients.map(p => ({
+            ...p,
+            vitalsHistory: safeParse(p.vitalsHistory),
+            notes: safeParse(p.notes),
+            allergies: safeParse(p.allergies),
+            vaccinations: safeParse(p.vaccinations)
+        }));
+    });
+
+    api.post('/patients', async (req: FastifyRequest<{ Body: any }>) => {
+        const { name, species, breed, age, gender, ownerId, color } = req.body;
+        const pet = await prisma.pet.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                ownerId, name, species, breed, gender, color,
+                age: Number(age) || 0,
+                // Default empty JSON arrays
+                vitalsHistory: "[]", notes: "[]", allergies: "[]", medicalConditions: "[]", vaccinations: "[]"
+            }
+        });
+        await createLog(req.user!.tenantId, req.user!.id, 'Created Patient', 'clinical', pet.name);
+        return pet;
+    });
+
+    api.get('/patients/:id', async (req: any) => {
+        const pet = await prisma.pet.findUnique({
+            where: { id: req.params.id },
+            include: { appointments: true, consultations: true, labResults: true }
+        });
+        if(!pet) return { error: "Not found" };
+        return {
+            ...pet,
+            vitalsHistory: safeParse(pet.vitalsHistory),
+            notes: safeParse(pet.notes),
+            allergies: safeParse(pet.allergies),
+            vaccinations: safeParse(pet.vaccinations)
+        };
+    });
+
+    // -------------------------
+    // D. OWNERS (CLIENTS)
+    // -------------------------
+    api.get('/owners', async (req) => {
+        return prisma.owner.findMany({
+            where: { tenantId: req.user!.tenantId },
+            include: { _count: { select: { pets: true } } },
+            orderBy: { createdAt: 'desc' }
+        });
+    });
+
+    api.post('/owners', async (req: FastifyRequest<{ Body: any }>) => {
+        return prisma.owner.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                name: req.body.name,
+                phone: req.body.phone,
+                email: req.body.email,
+                address: req.body.address
+            }
+        });
+    });
+
+    api.patch('/owners/:id/portal', async (req: any) => {
+        const { password, isActive } = req.body;
+        const data: any = { isPortalActive: isActive };
+        if(password) data.passwordHash = await bcrypt.hash(password, 10);
+        
+        return prisma.owner.update({
+            where: { id: req.params.id },
+            data
+        });
+    });
+
+    // -------------------------
+    // E. CLINICAL (Appts & Consults)
+    // -------------------------
+    api.get('/appointments', async (req: any) => {
+        const where: any = { tenantId: req.user!.tenantId };
+        // Optional date filter
+        if(req.query.date) {
+             const start = new Date(req.query.date);
+             const end = new Date(start); end.setDate(end.getDate() + 1);
+             where.date = { gte: start, lt: end };
+        }
+        return prisma.appointment.findMany({
+            where,
+            include: { pet: true, owner: true },
+            orderBy: { date: 'asc' }
+        });
+    });
+
+    api.post('/appointments', async (req: FastifyRequest<{ Body: any }>) => {
+        return prisma.appointment.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                petId: req.body.petId,
+                ownerId: req.body.ownerId,
+                date: new Date(req.body.date),
+                reason: req.body.reason,
+                status: 'Scheduled',
+                doctorName: req.body.doctorName
+            }
+        });
+    });
+
+    // Consultations (Medical Records)
+    api.post('/consultations', async (req: FastifyRequest<{ Body: any }>) => {
+        const consult = await prisma.consultation.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                petId: req.body.petId,
+                ownerId: req.body.ownerId,
+                date: new Date(),
+                vetName: req.user!.name || 'Staff',
+                // Serialize Objects to Strings
+                diagnosis: JSON.stringify(req.body.diagnosis || {}),
+                plan: req.body.plan,
+                exam: JSON.stringify(req.body.exam || {}),
+                vitals: JSON.stringify(req.body.vitals || {})
+            }
+        });
+        return consult;
+    });
+
+    // -------------------------
+    // F. INVENTORY & SALES
+    // -------------------------
+    api.get('/inventory', async (req) => {
+        return prisma.inventoryItem.findMany({ where: { tenantId: req.user!.tenantId } });
+    });
+
+    api.post('/inventory', async (req: FastifyRequest<{ Body: any }>) => {
+        return prisma.inventoryItem.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                name: req.body.name,
+                category: req.body.category,
+                sku: req.body.sku,
+                stock: Number(req.body.stock),
+                retailPrice: Number(req.body.retailPrice),
+                purchasePrice: Number(req.body.purchasePrice)
+            }
+        });
+    });
+
+    // CHECKOUT (POS)
+    api.post('/sales/checkout', async (req: FastifyRequest<{ Body: any }>) => {
+        const { items, total, ownerId, paymentMethod, discount } = req.body;
+        
+        // 1. Create Sale Record
+        const sale = await prisma.saleRecord.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                ownerId,
+                total: Number(total),
+                subtotal: Number(total), // Simplified
+                discount: Number(discount || 0),
+                status: 'Completed',
+                items: JSON.stringify(items),
+                payments: JSON.stringify([{ method: paymentMethod, amount: total, date: new Date() }]),
+                date: new Date()
+            }
+        });
+
+        // 2. Decrement Stock
+        for (const item of items) {
+            if (item.id) { // Assuming item.id is the InventoryItem ID
+                await prisma.inventoryItem.updateMany({
+                    where: { id: item.id, tenantId: req.user!.tenantId },
+                    data: { stock: { decrement: Number(item.quantity || 1) } }
+                });
+            }
+        }
+
+        await createLog(req.user!.tenantId, req.user!.id, 'New Sale', 'financial', `Total: ${total}`);
+        return sale;
+    });
+
+    // -------------------------
+    // G. ADMIN / USERS
+    // -------------------------
+    api.get('/users', async (req) => {
+        const users = await prisma.user.findMany({ 
+            where: { tenantId: req.user!.tenantId },
+            select: { id: true, name: true, email: true, roles: true, isSuspended: true }
+        });
+        return users.map(u => ({ ...u, roles: safeParse(u.roles) }));
+    });
+
+    api.post('/users', async (req: FastifyRequest<{ Body: any }>, reply) => {
+        const { name, email, password, roles } = req.body;
+        try {
+            const newUser = await prisma.user.create({
+                data: {
+                    tenantId: req.user!.tenantId,
+                    name, email,
+                    passwordHash: await bcrypt.hash(password, 10),
+                    roles: JSON.stringify(roles || ['Veterinarian']),
+                    isVerified: true
+                }
+            });
+            return { id: newUser.id, email: newUser.email };
+        } catch(e) { return reply.code(400).send({ error: "Email likely exists" }); }
+    });
+
+    // -------------------------
+    // H. AI ASSISTANT (Placeholder)
+    // -------------------------
+    api.post('/ai/chat', async (req: FastifyRequest<{ Body: { prompt: string } }>) => {
+        // Integrate your geminiService here.
+        // const answer = await geminiService.chat(req.body.prompt);
+        return { answer: `AI Logic for "${req.body.prompt}" is not yet connected in this file.` };
+    });
+
+  }); // End Protected API Routes
+}
