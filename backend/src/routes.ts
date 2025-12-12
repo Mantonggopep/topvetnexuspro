@@ -6,9 +6,6 @@ import { prisma } from './lib/prisma';
 // --- CONFIGURATION ---
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-change-me';
 
-// --- HELPER: ID Generator (Inline to fix import error) ---
-const generateId = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
 // --- TYPES ---
 interface AuthenticatedUser {
   id: string;
@@ -22,6 +19,9 @@ declare module 'fastify' {
     user?: AuthenticatedUser;
   }
 }
+
+// --- HELPER: ID Generator ---
+const generateId = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 // --- HELPER: Safe JSON Parser ---
 const safeParse = (data: string | null | undefined, fallback: any = []) => {
@@ -52,10 +52,8 @@ export async function appRoutes(app: FastifyInstance) {
   });
 
   app.post('/auth/login', async (req, reply) => {
-    // FIX: Type casting to 'any' to solve TS2339
     const body = req.body as any;
     const { email, password } = body;
-    
     try {
       const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
       if (!user) return reply.code(401).send({ error: 'Invalid credentials' });
@@ -68,8 +66,19 @@ export async function appRoutes(app: FastifyInstance) {
       const roles = safeParse(user.roles, ['Veterinarian']);
       const token = jwt.sign({ userId: user.id, tenantId: user.tenantId, roles }, JWT_SECRET, { expiresIn: '7d' });
 
-      reply.setCookie('token', token, { path: '/', httpOnly: true, secure: true, sameSite: 'none' });
-      return { success: true, token, user: { ...user, roles }, tenant: user.tenant };
+      reply.setCookie('token', token, { 
+        path: '/', 
+        httpOnly: true, 
+        secure: true, // Always true for Render
+        sameSite: 'none' 
+      });
+      
+      return { 
+          success: true, 
+          token, 
+          user: { ...user, roles }, 
+          tenant: user.tenant 
+      };
     } catch (e) { return reply.code(500).send({ error: 'Login failed' }); }
   });
 
@@ -96,7 +105,12 @@ export async function appRoutes(app: FastifyInstance) {
         JWT_SECRET, { expiresIn: '7d' }
       );
 
-      reply.setCookie('client_token', token, { path: '/', httpOnly: true, secure: true, sameSite: 'none' });
+      reply.setCookie('client_token', token, { 
+        path: '/', 
+        httpOnly: true, 
+        secure: true, 
+        sameSite: 'none' 
+      });
       return { success: true, token, user: { id: owner.id, name: owner.name } };
     } catch (e) { return reply.code(500).send({ error: 'Portal login failed' }); }
   });
@@ -118,9 +132,9 @@ export async function appRoutes(app: FastifyInstance) {
     portal.get('/portal/dashboard', async (req) => {
       const ownerId = req.user!.id;
       const [pets, appointments, invoices] = await Promise.all([
-        prisma.pet.findMany({ where: { ownerId } }), // FIX: prisma.patient -> prisma.pet
+        prisma.pet.findMany({ where: { ownerId } }),
         prisma.appointment.findMany({ where: { ownerId }, orderBy: { date: 'desc' }, take: 5 }),
-        prisma.saleRecord.findMany({ where: { ownerId }, orderBy: { date: 'desc' }, take: 5 }) // FIX: prisma.sale -> prisma.saleRecord
+        prisma.saleRecord.findMany({ where: { ownerId }, orderBy: { date: 'desc' }, take: 5 })
       ]);
       return { pets, appointments, invoices };
     });
@@ -163,7 +177,15 @@ export async function appRoutes(app: FastifyInstance) {
     api.get('/auth/me', async (req) => {
       const user = await prisma.user.findUnique({ where: { id: req.user!.id }, include: { tenant: true } });
       if (!user) throw new Error('User not found');
-      return { ...user, roles: safeParse(user.roles) };
+      
+      // ✅ FIXED: Returns correct nested structure { user, tenant } so Frontend works
+      return { 
+          user: {
+            ...user,
+            roles: safeParse(user.roles)
+          },
+          tenant: user.tenant
+      };
     });
 
     api.get('/users', async (req) => {
@@ -194,16 +216,16 @@ export async function appRoutes(app: FastifyInstance) {
         const tenantId = req.user!.tenantId;
         const [clients, patients, revenue, appointments] = await Promise.all([
             prisma.owner.count({ where: { tenantId } }),
-            prisma.pet.count({ where: { tenantId } }), // FIX: prisma.patient -> prisma.pet
-            prisma.saleRecord.aggregate({ where: { tenantId }, _sum: { total: true } }), // FIX: prisma.sale -> prisma.saleRecord
+            prisma.pet.count({ where: { tenantId } }),
+            prisma.saleRecord.aggregate({ where: { tenantId }, _sum: { total: true } }),
             prisma.appointment.count({ where: { tenantId, date: { gte: new Date() } } })
         ]);
         return { clients, patients, revenue: revenue._sum.total || 0, appointments };
     });
 
-    // --- PATIENTS (PETS) ---
+    // --- PATIENTS ---
     api.get('/patients', async (req) => {
-        const patients = await prisma.pet.findMany({ // FIX: prisma.patient -> prisma.pet
+        const patients = await prisma.pet.findMany({
             where: { tenantId: req.user!.tenantId },
             include: { owner: { select: { name: true, phone: true } } },
             orderBy: { createdAt: 'desc' },
@@ -321,7 +343,6 @@ export async function appRoutes(app: FastifyInstance) {
 
     // --- LABS ---
     api.get('/labs', async (req) => {
-        // Safe sort by createdAt to avoid error if 'date' doesn't exist on LabResult
         return prisma.labResult.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { createdAt: 'desc' } });
     });
     api.post('/labs', async (req) => {
@@ -341,7 +362,6 @@ export async function appRoutes(app: FastifyInstance) {
 
     // --- BRANCHES ---
     api.get('/branches', async (req) => {
-        // Return empty until Schema is updated
         return []; 
     });
     api.post('/branches', async (req) => {
@@ -398,7 +418,6 @@ export async function appRoutes(app: FastifyInstance) {
         const body = req.body as any;
         const { items, total, ownerId, paymentMethod, discount } = body;
         
-        // Transaction to ensure stock is deducted only if sale succeeds
         const sale = await prisma.$transaction(async (tx) => {
             const newSale = await tx.saleRecord.create({
                 data: {
