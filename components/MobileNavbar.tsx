@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Users, Calendar, CreditCard, Menu } from 'lucide-react';
+import { Home, Users, Calendar, CreditCard, Menu, Activity, ClipboardList } from 'lucide-react';
 import { ViewType } from '../types';
 
 interface MobileNavbarProps {
@@ -9,16 +9,19 @@ interface MobileNavbarProps {
 }
 
 const MobileNavbar: React.FC<MobileNavbarProps> = ({ currentView, onNavigate, onOpenMenu }) => {
+  // Configured principal navigation items
   const navItems = [
-    { id: 'dashboard', label: 'Home', icon: Home },
-    { id: 'patients', label: 'Patients', icon: Users },
-    { id: 'appointments', label: 'Schedule', icon: Calendar },
-    { id: 'pos', label: 'POS', icon: CreditCard },
+    { id: 'dashboard', icon: Home },
+    { id: 'patients', icon: Users },
+    { id: 'appointments', icon: Calendar },
+    { id: 'treatments', icon: Activity },
+    { id: 'pos', icon: CreditCard },
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-200 pb-safe z-50">
-      <div className="flex justify-around items-center h-16 px-1">
+    <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center pointer-events-none px-4">
+      <nav className="pointer-events-auto glass-nav rounded-full flex items-center px-2 py-2 gap-2 shadow-2xl shadow-black/20">
+        
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentView === item.id;
@@ -26,24 +29,30 @@ const MobileNavbar: React.FC<MobileNavbarProps> = ({ currentView, onNavigate, on
             <button
               key={item.id}
               onClick={() => onNavigate(item.id as ViewType)}
-              className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${
-                isActive ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
+              className={`relative flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ${
+                isActive 
+                  ? 'bg-white text-black shadow-lg scale-110 -translate-y-2' 
+                  : 'text-slate-400 hover:text-white hover:bg-white/10'
               }`}
             >
-              <Icon className={`w-6 h-6 ${isActive ? 'fill-current opacity-20' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
-              <span className="text-[10px] font-medium">{item.label}</span>
+              <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
+              {isActive && (
+                <span className="absolute -bottom-3 w-1 h-1 rounded-full bg-white/50 animate-pulse"></span>
+              )}
             </button>
           );
         })}
         
+        <div className="w-px h-6 bg-white/20 mx-1"></div>
+
         <button
           onClick={onOpenMenu}
-          className="flex flex-col items-center justify-center w-full h-full space-y-1 text-slate-400 hover:text-slate-600"
+          className="relative flex items-center justify-center w-12 h-12 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-all active:scale-95"
         >
           <Menu className="w-6 h-6" />
-          <span className="text-[10px] font-medium">Menu</span>
         </button>
-      </div>
+
+      </nav>
     </div>
   );
 };
