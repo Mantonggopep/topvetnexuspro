@@ -403,4 +403,8 @@ export async function appRoutes(app: FastifyInstance) {
     });
 
   });
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 047a0a1f230a101304e72803f8b8ed714938467f

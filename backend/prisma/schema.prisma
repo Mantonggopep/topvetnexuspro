@@ -58,7 +58,7 @@ model Branch {
   address   String?
   phone     String?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt // FIXED
 }
 
 model Log {
@@ -89,7 +89,7 @@ model User {
   isVerified   Boolean @default(false)
   
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime @default(now()) @updatedAt // FIXED
 }
 
 model VerificationToken {
@@ -123,7 +123,7 @@ model Owner {
   lastLogin      DateTime?
 
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime @default(now()) @updatedAt // FIXED
 
   // Relations
   pets          Pet[]
@@ -159,7 +159,7 @@ model Pet {
   vaccinations      String   @default("[]")
 
   createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime @default(now()) @updatedAt // FIXED
 
   appointments      Appointment[]
   consultations     Consultation[]
@@ -186,7 +186,7 @@ model Appointment {
   doctorName String?
   
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime @default(now()) @updatedAt // FIXED
 }
 
 model Consultation {
@@ -220,7 +220,7 @@ model Consultation {
   financials          String   @default("{}")
   
   createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  updatedAt           DateTime @default(now()) @updatedAt // FIXED
 }
 
 model LabResult {
@@ -248,8 +248,8 @@ model LabResult {
   conductedBy    String?
   cost           Float     @default(0)
 
-  createdAt      DateTime  @default(now()) // Matches 'orderBy: createdAt' in code
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now()) 
+  updatedAt      DateTime  @default(now()) @updatedAt // FIXED
 }
 
 // ==========================================
@@ -277,7 +277,7 @@ model InventoryItem {
   supplier       String?
   
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  updatedAt      DateTime  @default(now()) @updatedAt // FIXED
 }
 
 model SaleRecord {
@@ -312,7 +312,7 @@ model SaleRecord {
   notes         String?
   
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime @default(now()) @updatedAt // FIXED
 }
 
 model Expense {
