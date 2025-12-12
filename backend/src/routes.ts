@@ -6,7 +6,7 @@ import { prisma } from './lib/prisma';
 // --- CONFIGURATION ---
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-change-me';
 
-// --- TYPES (for Type Safety) ---
+// --- TYPES ---
 interface AuthenticatedUser {
   id: string;
   tenantId: string;
@@ -41,14 +41,18 @@ async function createLog(tenantId: string, user: string, action: string, type: s
 export async function appRoutes(app: FastifyInstance) {
 
   // =================================================================
-  // 1. PUBLIC ROUTES (Auth, Webhooks, Public Info)
+  // 1. PUBLIC ROUTES (No Token Needed)
   // =================================================================
+
+  // --- PLANS (Must be public for Signup) ---
+  app.get('/plans', async () => {
+    return prisma.plan.findMany();
+  });
 
   // --- STAFF LOGIN ---
   app.post('/auth/login', async (req, reply) => {
-    const body = req.body as any; // FIX: Force type to any
+    const body = req.body as any;
     const { email, password } = body;
-    
     try {
       const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
       if (!user) return reply.code(401).send({ error: 'Invalid credentials' });
@@ -72,28 +76,23 @@ export async function appRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
-  // --- CLIENT PORTAL LOGIN (Owners) ---
+  // --- CLIENT PORTAL LOGIN ---
   app.post('/portal/login', async (req, reply) => {
-    const body = req.body as any; // FIX: Force type to any
+    const body = req.body as any;
     const { email, phone, password } = body;
-
     try {
       const owner = await prisma.owner.findFirst({
         where: { OR: [{ email: email || undefined }, { phone: phone || undefined }] }
       });
-
       if (!owner || !owner.isPortalActive || !owner.passwordHash) {
         return reply.code(403).send({ error: 'Portal access invalid or disabled.' });
       }
-
       const isValid = await bcrypt.compare(password, owner.passwordHash);
       if (!isValid) return reply.code(401).send({ error: 'Invalid credentials' });
 
-      // Special Token for Clients
       const token = jwt.sign(
         { userId: owner.id, tenantId: owner.tenantId, type: 'CLIENT', name: owner.name },
-        JWT_SECRET,
-        { expiresIn: '7d' }
+        JWT_SECRET, { expiresIn: '7d' }
       );
 
       reply.setCookie('client_token', token, { path: '/', httpOnly: true, secure: process.env.NODE_ENV === 'production' });
@@ -115,7 +114,6 @@ export async function appRoutes(app: FastifyInstance) {
       } catch (err) { return reply.code(401).send({ error: 'Portal Unauthorized' }); }
     });
 
-    // Portal Dashboard
     portal.get('/portal/dashboard', async (req) => {
       const ownerId = req.user!.id;
       const [pets, appointments, invoices] = await Promise.all([
@@ -126,9 +124,8 @@ export async function appRoutes(app: FastifyInstance) {
       return { pets, appointments, invoices };
     });
 
-    // Book Appointment (Client)
     portal.post('/portal/appointments', async (req) => {
-      const body = req.body as any; // FIX: Force type to any
+      const body = req.body as any;
       return prisma.appointment.create({
         data: {
           tenantId: req.user!.tenantId,
@@ -142,17 +139,15 @@ export async function appRoutes(app: FastifyInstance) {
       });
     });
     
-    // Portal Pets
     portal.get('/portal/pets', async (req) => {
        return prisma.pet.findMany({ where: { ownerId: req.user!.id } });
     });
-  }); // End Portal
+  });
 
   // =================================================================
   // 3. STAFF PROTECTED ROUTES (Veterinarians/Admins)
   // =================================================================
   app.register(async (api) => {
-    // --- AUTH MIDDLEWARE ---
     api.addHook('preHandler', async (req, reply) => {
       try {
         const token = req.cookies.token || (req.headers.authorization as string)?.replace('Bearer ', '');
@@ -162,18 +157,36 @@ export async function appRoutes(app: FastifyInstance) {
       } catch (err) { return reply.code(401).send({ error: 'Unauthorized' }); }
     });
 
-    // -------------------------
-    // A. CURRENT USER
-    // -------------------------
+    // --- AUTH & USER ---
     api.get('/auth/me', async (req) => {
       const user = await prisma.user.findUnique({ where: { id: req.user!.id }, include: { tenant: true } });
       if (!user) throw new Error('User not found');
       return { ...user, roles: safeParse(user.roles) };
     });
 
-    // -------------------------
-    // B. DASHBOARD & STATS
-    // -------------------------
+    api.get('/users', async (req) => {
+        const users = await prisma.user.findMany({ where: { tenantId: req.user!.tenantId } });
+        return users.map(u => ({ ...u, roles: safeParse(u.roles) }));
+    });
+
+    api.post('/users', async (req, reply) => {
+        const body = req.body as any;
+        const { name, email, password, roles } = body;
+        try {
+            const newUser = await prisma.user.create({
+                data: {
+                    tenantId: req.user!.tenantId,
+                    name, email,
+                    passwordHash: await bcrypt.hash(password, 10),
+                    roles: JSON.stringify(roles || ['Veterinarian']),
+                    isVerified: true
+                }
+            });
+            return { id: newUser.id, email: newUser.email };
+        } catch(e) { return reply.code(400).send({ error: "Email exists" }); }
+    });
+
+    // --- DASHBOARD ---
     api.get('/stats/dashboard', async (req) => {
         const tenantId = req.user!.tenantId;
         const [clients, patients, revenue, appointments] = await Promise.all([
@@ -185,9 +198,7 @@ export async function appRoutes(app: FastifyInstance) {
         return { clients, patients, revenue: revenue._sum.total || 0, appointments };
     });
 
-    // -------------------------
-    // C. PATIENTS (PETS)
-    // -------------------------
+    // --- PATIENTS ---
     api.get('/patients', async (req) => {
         const patients = await prisma.pet.findMany({
             where: { tenantId: req.user!.tenantId },
@@ -195,7 +206,6 @@ export async function appRoutes(app: FastifyInstance) {
             orderBy: { createdAt: 'desc' },
             take: 100
         });
-        // Parse JSON strings for frontend
         return patients.map(p => ({
             ...p,
             vitalsHistory: safeParse(p.vitalsHistory),
@@ -204,9 +214,8 @@ export async function appRoutes(app: FastifyInstance) {
             vaccinations: safeParse(p.vaccinations)
         }));
     });
-
     api.post('/patients', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
+        const body = req.body as any;
         const { name, species, breed, age, gender, ownerId, color } = body;
         const pet = await prisma.pet.create({
             data: {
@@ -219,7 +228,6 @@ export async function appRoutes(app: FastifyInstance) {
         await createLog(req.user!.tenantId, req.user!.id, 'Created Patient', 'clinical', pet.name);
         return pet;
     });
-
     api.get('/patients/:id', async (req: any) => {
         const pet = await prisma.pet.findUnique({
             where: { id: req.params.id },
@@ -235,44 +243,24 @@ export async function appRoutes(app: FastifyInstance) {
         };
     });
 
-    // -------------------------
-    // D. OWNERS (CLIENTS)
-    // -------------------------
+    // --- OWNERS ---
     api.get('/owners', async (req) => {
-        return prisma.owner.findMany({
-            where: { tenantId: req.user!.tenantId },
-            include: { _count: { select: { pets: true } } },
-            orderBy: { createdAt: 'desc' }
-        });
+        return prisma.owner.findMany({ where: { tenantId: req.user!.tenantId }, include: { _count: { select: { pets: true } } } });
     });
-
     api.post('/owners', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
+        const body = req.body as any;
         return prisma.owner.create({
-            data: {
-                tenantId: req.user!.tenantId,
-                name: body.name,
-                phone: body.phone,
-                email: body.email,
-                address: body.address
-            }
+            data: { tenantId: req.user!.tenantId, name: body.name, phone: body.phone, email: body.email, address: body.address }
         });
     });
-
     api.patch('/owners/:id/portal', async (req: any) => {
         const { password, isActive } = req.body;
         const data: any = { isPortalActive: isActive };
         if(password) data.passwordHash = await bcrypt.hash(password, 10);
-        
-        return prisma.owner.update({
-            where: { id: req.params.id },
-            data
-        });
+        return prisma.owner.update({ where: { id: req.params.id }, data });
     });
 
-    // -------------------------
-    // E. CLINICAL (Appts & Consults)
-    // -------------------------
+    // --- CLINICAL ---
     api.get('/appointments', async (req: any) => {
         const where: any = { tenantId: req.user!.tenantId };
         if(req.query.date) {
@@ -280,32 +268,20 @@ export async function appRoutes(app: FastifyInstance) {
              const end = new Date(start); end.setDate(end.getDate() + 1);
              where.date = { gte: start, lt: end };
         }
-        return prisma.appointment.findMany({
-            where,
-            include: { pet: true, owner: true },
-            orderBy: { date: 'asc' }
-        });
+        return prisma.appointment.findMany({ where, include: { pet: true, owner: true }, orderBy: { date: 'asc' } });
     });
-
     api.post('/appointments', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
+        const body = req.body as any;
         return prisma.appointment.create({
-            data: {
-                tenantId: req.user!.tenantId,
-                petId: body.petId,
-                ownerId: body.ownerId,
-                date: new Date(body.date),
-                reason: body.reason,
-                status: 'Scheduled',
-                doctorName: body.doctorName
-            }
+            data: { tenantId: req.user!.tenantId, petId: body.petId, ownerId: body.ownerId, date: new Date(body.date), reason: body.reason, status: 'Scheduled', doctorName: body.doctorName }
         });
     });
-
-    // Consultations (Medical Records)
+    api.get('/consultations', async (req) => {
+         return prisma.consultation.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { date: 'desc' } });
+    });
     api.post('/consultations', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
-        const consult = await prisma.consultation.create({
+        const body = req.body as any;
+        return prisma.consultation.create({
             data: {
                 tenantId: req.user!.tenantId,
                 petId: body.petId,
@@ -318,18 +294,65 @@ export async function appRoutes(app: FastifyInstance) {
                 vitals: JSON.stringify(body.vitals || {})
             }
         });
-        return consult;
     });
 
-    // -------------------------
-    // F. INVENTORY & SALES
-    // -------------------------
+    // --- LABS (Fix for 404) ---
+    api.get('/labs', async (req) => {
+        return prisma.labResult.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { date: 'desc' } });
+    });
+    api.post('/labs', async (req) => {
+        const body = req.body as any;
+        return prisma.labResult.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                petId: body.petId,
+                testType: body.testType,
+                result: body.result,
+                status: body.status || 'Pending',
+                date: new Date()
+            }
+        });
+    });
+
+    // --- BRANCHES (Fix for 404) ---
+    api.get('/branches', async (req) => {
+        return prisma.branch.findMany({ where: { tenantId: req.user!.tenantId } });
+    });
+    api.post('/branches', async (req) => {
+        const body = req.body as any;
+        return prisma.branch.create({
+            data: { tenantId: req.user!.tenantId, name: body.name, address: body.address, phone: body.phone }
+        });
+    });
+
+    // --- LOGS (Fix for 404) ---
+    api.get('/logs', async (req) => {
+        return prisma.log.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { timestamp: 'desc' }, take: 100 });
+    });
+
+    // --- EXPENSES (Fix for 404) ---
+    api.get('/expenses', async (req) => {
+        return prisma.expense.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { date: 'desc' } });
+    });
+    api.post('/expenses', async (req) => {
+        const body = req.body as any;
+        return prisma.expense.create({
+            data: {
+                tenantId: req.user!.tenantId,
+                description: body.description,
+                amount: Number(body.amount),
+                category: body.category,
+                date: new Date(body.date || Date.now())
+            }
+        });
+    });
+
+    // --- INVENTORY & SALES ---
     api.get('/inventory', async (req) => {
         return prisma.inventoryItem.findMany({ where: { tenantId: req.user!.tenantId } });
     });
-
     api.post('/inventory', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
+        const body = req.body as any;
         return prisma.inventoryItem.create({
             data: {
                 tenantId: req.user!.tenantId,
@@ -342,13 +365,12 @@ export async function appRoutes(app: FastifyInstance) {
             }
         });
     });
-
-    // CHECKOUT (POS)
+    api.get('/sales', async (req) => {
+        return prisma.saleRecord.findMany({ where: { tenantId: req.user!.tenantId }, orderBy: { date: 'desc' } });
+    });
     api.post('/sales/checkout', async (req) => {
-        const body = req.body as any; // FIX: Force type to any
+        const body = req.body as any;
         const { items, total, ownerId, paymentMethod, discount } = body;
-        
-        // 1. Create Sale Record
         const sale = await prisma.saleRecord.create({
             data: {
                 tenantId: req.user!.tenantId,
@@ -362,8 +384,6 @@ export async function appRoutes(app: FastifyInstance) {
                 date: new Date()
             }
         });
-
-        // 2. Decrement Stock
         if (Array.isArray(items)) {
             for (const item of items) {
                 if (item.id) {
@@ -374,46 +394,15 @@ export async function appRoutes(app: FastifyInstance) {
                 }
             }
         }
-
         await createLog(req.user!.tenantId, req.user!.id, 'New Sale', 'financial', `Total: ${total}`);
         return sale;
     });
 
-    // -------------------------
-    // G. ADMIN / USERS
-    // -------------------------
-    api.get('/users', async (req) => {
-        const users = await prisma.user.findMany({ 
-            where: { tenantId: req.user!.tenantId },
-            select: { id: true, name: true, email: true, roles: true, isSuspended: true }
-        });
-        return users.map(u => ({ ...u, roles: safeParse(u.roles) }));
-    });
-
-    api.post('/users', async (req, reply) => {
-        const body = req.body as any; // FIX: Force type to any
-        const { name, email, password, roles } = body;
-        try {
-            const newUser = await prisma.user.create({
-                data: {
-                    tenantId: req.user!.tenantId,
-                    name, email,
-                    passwordHash: await bcrypt.hash(password, 10),
-                    roles: JSON.stringify(roles || ['Veterinarian']),
-                    isVerified: true
-                }
-            });
-            return { id: newUser.id, email: newUser.email };
-        } catch(e) { return reply.code(400).send({ error: "Email likely exists" }); }
-    });
-
-    // -------------------------
-    // H. AI ASSISTANT (Placeholder)
-    // -------------------------
+    // --- AI ASSISTANT ---
     api.post('/ai/chat', async (req) => {
         const body = req.body as any; 
         return { answer: `AI Logic for "${body.prompt}" is not yet connected in this file.` };
     });
 
-  }); // End Protected API Routes
+  });
 }
