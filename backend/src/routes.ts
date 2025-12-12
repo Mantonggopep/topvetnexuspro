@@ -45,8 +45,10 @@ export async function appRoutes(app: FastifyInstance) {
   // =================================================================
 
   // --- STAFF LOGIN ---
-  app.post('/auth/login', async (req: FastifyRequest<{ Body: { email: string, password: string } }>, reply) => {
-    const { email, password } = req.body;
+  app.post('/auth/login', async (req, reply) => {
+    const body = req.body as any; // FIX: Force type to any
+    const { email, password } = body;
+    
     try {
       const user = await prisma.user.findUnique({ where: { email }, include: { tenant: true } });
       if (!user) return reply.code(401).send({ error: 'Invalid credentials' });
@@ -71,8 +73,10 @@ export async function appRoutes(app: FastifyInstance) {
   });
 
   // --- CLIENT PORTAL LOGIN (Owners) ---
-  app.post('/portal/login', async (req: FastifyRequest<{ Body: { email?: string, phone?: string, password: string } }>, reply) => {
-    const { email, phone, password } = req.body;
+  app.post('/portal/login', async (req, reply) => {
+    const body = req.body as any; // FIX: Force type to any
+    const { email, phone, password } = body;
+
     try {
       const owner = await prisma.owner.findFirst({
         where: { OR: [{ email: email || undefined }, { phone: phone || undefined }] }
@@ -123,21 +127,22 @@ export async function appRoutes(app: FastifyInstance) {
     });
 
     // Book Appointment (Client)
-    portal.post('/portal/appointments', async (req: FastifyRequest<{ Body: any }>) => {
+    portal.post('/portal/appointments', async (req) => {
+      const body = req.body as any; // FIX: Force type to any
       return prisma.appointment.create({
         data: {
           tenantId: req.user!.tenantId,
           ownerId: req.user!.id,
-          petId: req.body.petId,
-          date: new Date(req.body.date),
-          reason: req.body.reason,
+          petId: body.petId,
+          date: new Date(body.date),
+          reason: body.reason,
           status: 'Scheduled',
           doctorName: 'Pending'
         }
       });
     });
     
-    // Portal Pets (Added this to fix frontend error)
+    // Portal Pets
     portal.get('/portal/pets', async (req) => {
        return prisma.pet.findMany({ where: { ownerId: req.user!.id } });
     });
@@ -200,14 +205,14 @@ export async function appRoutes(app: FastifyInstance) {
         }));
     });
 
-    api.post('/patients', async (req: FastifyRequest<{ Body: any }>) => {
-        const { name, species, breed, age, gender, ownerId, color } = req.body;
+    api.post('/patients', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
+        const { name, species, breed, age, gender, ownerId, color } = body;
         const pet = await prisma.pet.create({
             data: {
                 tenantId: req.user!.tenantId,
                 ownerId, name, species, breed, gender, color,
                 age: Number(age) || 0,
-                // Default empty JSON arrays
                 vitalsHistory: "[]", notes: "[]", allergies: "[]", medicalConditions: "[]", vaccinations: "[]"
             }
         });
@@ -241,14 +246,15 @@ export async function appRoutes(app: FastifyInstance) {
         });
     });
 
-    api.post('/owners', async (req: FastifyRequest<{ Body: any }>) => {
+    api.post('/owners', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
         return prisma.owner.create({
             data: {
                 tenantId: req.user!.tenantId,
-                name: req.body.name,
-                phone: req.body.phone,
-                email: req.body.email,
-                address: req.body.address
+                name: body.name,
+                phone: body.phone,
+                email: body.email,
+                address: body.address
             }
         });
     });
@@ -269,7 +275,6 @@ export async function appRoutes(app: FastifyInstance) {
     // -------------------------
     api.get('/appointments', async (req: any) => {
         const where: any = { tenantId: req.user!.tenantId };
-        // Optional date filter
         if(req.query.date) {
              const start = new Date(req.query.date);
              const end = new Date(start); end.setDate(end.getDate() + 1);
@@ -282,34 +287,35 @@ export async function appRoutes(app: FastifyInstance) {
         });
     });
 
-    api.post('/appointments', async (req: FastifyRequest<{ Body: any }>) => {
+    api.post('/appointments', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
         return prisma.appointment.create({
             data: {
                 tenantId: req.user!.tenantId,
-                petId: req.body.petId,
-                ownerId: req.body.ownerId,
-                date: new Date(req.body.date),
-                reason: req.body.reason,
+                petId: body.petId,
+                ownerId: body.ownerId,
+                date: new Date(body.date),
+                reason: body.reason,
                 status: 'Scheduled',
-                doctorName: req.body.doctorName
+                doctorName: body.doctorName
             }
         });
     });
 
     // Consultations (Medical Records)
-    api.post('/consultations', async (req: FastifyRequest<{ Body: any }>) => {
+    api.post('/consultations', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
         const consult = await prisma.consultation.create({
             data: {
                 tenantId: req.user!.tenantId,
-                petId: req.body.petId,
-                ownerId: req.body.ownerId,
+                petId: body.petId,
+                ownerId: body.ownerId,
                 date: new Date(),
                 vetName: req.user!.name || 'Staff',
-                // Serialize Objects to Strings
-                diagnosis: JSON.stringify(req.body.diagnosis || {}),
-                plan: req.body.plan,
-                exam: JSON.stringify(req.body.exam || {}),
-                vitals: JSON.stringify(req.body.vitals || {})
+                diagnosis: JSON.stringify(body.diagnosis || {}),
+                plan: body.plan,
+                exam: JSON.stringify(body.exam || {}),
+                vitals: JSON.stringify(body.vitals || {})
             }
         });
         return consult;
@@ -322,23 +328,25 @@ export async function appRoutes(app: FastifyInstance) {
         return prisma.inventoryItem.findMany({ where: { tenantId: req.user!.tenantId } });
     });
 
-    api.post('/inventory', async (req: FastifyRequest<{ Body: any }>) => {
+    api.post('/inventory', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
         return prisma.inventoryItem.create({
             data: {
                 tenantId: req.user!.tenantId,
-                name: req.body.name,
-                category: req.body.category,
-                sku: req.body.sku,
-                stock: Number(req.body.stock),
-                retailPrice: Number(req.body.retailPrice),
-                purchasePrice: Number(req.body.purchasePrice)
+                name: body.name,
+                category: body.category,
+                sku: body.sku,
+                stock: Number(body.stock),
+                retailPrice: Number(body.retailPrice),
+                purchasePrice: Number(body.purchasePrice)
             }
         });
     });
 
     // CHECKOUT (POS)
-    api.post('/sales/checkout', async (req: FastifyRequest<{ Body: any }>) => {
-        const { items, total, ownerId, paymentMethod, discount } = req.body;
+    api.post('/sales/checkout', async (req) => {
+        const body = req.body as any; // FIX: Force type to any
+        const { items, total, ownerId, paymentMethod, discount } = body;
         
         // 1. Create Sale Record
         const sale = await prisma.saleRecord.create({
@@ -346,7 +354,7 @@ export async function appRoutes(app: FastifyInstance) {
                 tenantId: req.user!.tenantId,
                 ownerId,
                 total: Number(total),
-                subtotal: Number(total), // Simplified
+                subtotal: Number(total), 
                 discount: Number(discount || 0),
                 status: 'Completed',
                 items: JSON.stringify(items),
@@ -356,12 +364,14 @@ export async function appRoutes(app: FastifyInstance) {
         });
 
         // 2. Decrement Stock
-        for (const item of items) {
-            if (item.id) {
-                await prisma.inventoryItem.updateMany({
-                    where: { id: item.id, tenantId: req.user!.tenantId },
-                    data: { stock: { decrement: Number(item.quantity || 1) } }
-                });
+        if (Array.isArray(items)) {
+            for (const item of items) {
+                if (item.id) {
+                    await prisma.inventoryItem.updateMany({
+                        where: { id: item.id, tenantId: req.user!.tenantId },
+                        data: { stock: { decrement: Number(item.quantity || 1) } }
+                    });
+                }
             }
         }
 
@@ -380,8 +390,9 @@ export async function appRoutes(app: FastifyInstance) {
         return users.map(u => ({ ...u, roles: safeParse(u.roles) }));
     });
 
-    api.post('/users', async (req: FastifyRequest<{ Body: any }>, reply) => {
-        const { name, email, password, roles } = req.body;
+    api.post('/users', async (req, reply) => {
+        const body = req.body as any; // FIX: Force type to any
+        const { name, email, password, roles } = body;
         try {
             const newUser = await prisma.user.create({
                 data: {
@@ -399,9 +410,9 @@ export async function appRoutes(app: FastifyInstance) {
     // -------------------------
     // H. AI ASSISTANT (Placeholder)
     // -------------------------
-    api.post('/ai/chat', async (req: FastifyRequest<{ Body: { prompt: string } }>) => {
-        // Integrate your geminiService here.
-        return { answer: `AI Logic for "${req.body.prompt}" is not yet connected in this file.` };
+    api.post('/ai/chat', async (req) => {
+        const body = req.body as any; 
+        return { answer: `AI Logic for "${body.prompt}" is not yet connected in this file.` };
     });
 
   }); // End Protected API Routes
