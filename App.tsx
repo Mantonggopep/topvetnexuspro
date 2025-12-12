@@ -210,6 +210,13 @@ const App: React.FC = () => {
   };
   
   // --- HANDLERS ---
+
+  // ✅ ADDED THIS MISSING FUNCTION
+  const handlePatientSelect = (id: string) => {
+      setSelectedPatientId(id);
+      setCurrentView('patients');
+  };
+
   const handleAddPatient = async (petData: any) => withLoading(async () => {
       const { data } = await PatientService.create(petData);
       setAppState(prev => ({ ...prev, pets: [...prev.pets, data] }));
@@ -315,11 +322,12 @@ const App: React.FC = () => {
   // --- RENDER ---
   if (isLoading) return <LoadingScreen message="Initializing Vet Nexus..." />;
 
-  // ✅ CRITICAL FIX: If no user, Show Auth Screen immediately
+  // Auth Screen
   if (!appState.currentUser) {
       return <Auth onLogin={handleLogin} onSignup={handleSignup} plans={appState.subscriptionPlans} />;
   }
 
+  // Admin Dashboard
   if (appState.currentUser.roles.includes('SuperAdmin')) {
       return <SuperAdminDashboard appState={appState} onUpdateTenant={()=>{}} onCreateTenant={()=>{}} onUpdatePlan={handleUpdateSubscriptionPlan} onUpdateTicket={handleUpdateTicket} onLogout={handleLogout} />;
   }
@@ -395,13 +403,13 @@ const App: React.FC = () => {
             <PageTransition view={currentView}>
                 <div className="w-full max-w-full">
                     {currentView === 'dashboard' && <Dashboard state={appState} onNavigate={setCurrentView} onSelectPatient={handlePatientSelect} />}
-                    {currentView === 'patients' && <PatientList pets={appState.pets} owners={appState.owners} onSelectPatient={(id) => { setSelectedPatientId(id); setCurrentView('patients'); }} onAddPatient={handleAddPatient}/>}
+                    {currentView === 'patients' && <PatientList pets={appState.pets} owners={appState.owners} onSelectPatient={handlePatientSelect} onAddPatient={handleAddPatient}/>}
                     {currentView === 'patients' && selectedPatientId && (
                             <PatientDetail pet={appState.pets.find(p => p.id === selectedPatientId)!} onBack={() => setSelectedPatientId(null)} onAddNote={()=>{}} />
                     )}
                     {currentView === 'clients' && <Clients currency={currency} />}
                     {currentView === 'appointments' && <Appointments appointments={appState.appointments} pets={appState.pets} owners={appState.owners} onAddAppointment={handleAddAppointment} />}
-                    {currentView === 'treatments' && <Treatments activePatients={appState.pets} appointments={appState.appointments} consultations={appState.consultations} owners={appState.owners} settings={currentTenant.settings} plan={currentTenant.plan} onSelectPatient={(id) => { setSelectedPatientId(id); setCurrentView('patients'); }} onAddConsultation={handleAddConsultation} onAddLabRequest={handleAddLabRequest} onAddPatient={handleAddPatient} />}
+                    {currentView === 'treatments' && <Treatments activePatients={appState.pets} appointments={appState.appointments} consultations={appState.consultations} owners={appState.owners} settings={currentTenant.settings} plan={currentTenant.plan} onSelectPatient={handlePatientSelect} onAddConsultation={handleAddConsultation} onAddLabRequest={handleAddLabRequest} onAddPatient={handleAddPatient} />}
                     {currentView === 'inventory' && <Inventory items={appState.inventory} currency={currency} onAddItem={handleAddInventory} onUpdateItem={handleUpdateInventory} />}
                     {currentView === 'pos' && <POS sales={appState.sales} owners={appState.owners} settings={currentTenant.settings} inventory={appState.inventory} plan={currentTenant.plan} onSaveSale={handleSaveSale} onDeleteSale={handleDeleteSale} />}
                     {currentView === 'lab' && <Lab results={appState.labResults} pets={appState.pets} owners={appState.owners} onAddResult={handleAddLabRequest} onUpdateResult={handleUpdateLabResult} />}
