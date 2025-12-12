@@ -5,7 +5,6 @@ import { prisma } from './lib/prisma';
 
 // --- CONFIGURATION ---
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-change-me';
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
 
 // --- TYPES (for Type Safety) ---
 interface AuthenticatedUser {
@@ -22,13 +21,12 @@ declare module 'fastify' {
 }
 
 // --- HELPER: Safe JSON Parser ---
-// Handles Prisma fields stored as Strings (e.g., "[]") to prevent crashes
 const safeParse = (data: string | null | undefined, fallback: any = []) => {
   if (!data) return fallback;
   try { return JSON.parse(data); } catch { return fallback; }
 };
 
-// --- HELPER: Internal Logger (Replaces external utils to prevent import errors) ---
+// --- HELPER: Internal Logger ---
 async function createLog(tenantId: string, user: string, action: string, type: string, details?: string) {
   try {
     await prisma.log.create({
@@ -138,6 +136,11 @@ export async function appRoutes(app: FastifyInstance) {
         }
       });
     });
+    
+    // Portal Pets (Added this to fix frontend error)
+    portal.get('/portal/pets', async (req) => {
+       return prisma.pet.findMany({ where: { ownerId: req.user!.id } });
+    });
   }); // End Portal
 
   // =================================================================
@@ -151,8 +154,6 @@ export async function appRoutes(app: FastifyInstance) {
         if (!token) throw new Error('Missing token');
         const decoded: any = jwt.verify(token, JWT_SECRET);
         req.user = { id: decoded.userId, tenantId: decoded.tenantId, roles: decoded.roles, name: 'Staff' }; 
-        
-        // Fetch real name if needed, but skipping for performance
       } catch (err) { return reply.code(401).send({ error: 'Unauthorized' }); }
     });
 
@@ -356,7 +357,7 @@ export async function appRoutes(app: FastifyInstance) {
 
         // 2. Decrement Stock
         for (const item of items) {
-            if (item.id) { // Assuming item.id is the InventoryItem ID
+            if (item.id) {
                 await prisma.inventoryItem.updateMany({
                     where: { id: item.id, tenantId: req.user!.tenantId },
                     data: { stock: { decrement: Number(item.quantity || 1) } }
@@ -400,7 +401,6 @@ export async function appRoutes(app: FastifyInstance) {
     // -------------------------
     api.post('/ai/chat', async (req: FastifyRequest<{ Body: { prompt: string } }>) => {
         // Integrate your geminiService here.
-        // const answer = await geminiService.chat(req.body.prompt);
         return { answer: `AI Logic for "${req.body.prompt}" is not yet connected in this file.` };
     });
 
