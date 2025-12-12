@@ -6,28 +6,13 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './lib/prisma';
 import { DEFAULT_PLANS } from './utils/serverHelpers';
 
-// --- ROUTE IMPORT (Single File) ---
+// --- ROUTE IMPORT ---
 import { appRoutes } from './routes'; 
 
-// --- LOGGER CONFIGURATION ---
-const isProduction = process.env.NODE_ENV === 'production';
-
-// In production, use default JSON logger (true). In dev, use pretty printing.
-const loggerConfig = isProduction
-  ? { level: 'info' } // Production: JSON logs, safer and faster
-  : {
-      level: 'info',
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          translateTime: 'HH:MM:ss Z',
-          ignore: 'pid,hostname',
-        },
-      },
-    };
-
+// --- SERVER SETUP ---
+// We use the standard JSON logger here to avoid "pino-pretty" errors in production.
 const app: FastifyInstance = Fastify({ 
-  logger: loggerConfig,
+  logger: { level: 'info' }, 
   // Keep the 10MB limit for file uploads/images
   bodyLimit: 1048576 * 10 
 });
@@ -39,10 +24,10 @@ const PORT = parseInt(process.env.PORT || '4000');
 // 1. Security Headers
 app.register(helmet, { contentSecurityPolicy: false, global: true });
 
-// 2. CORS Configuration (Strict but allows Vercel & Localhost)
+// 2. CORS Configuration
 app.register(cors, {
   origin: (origin, cb) => {
-    // Allow non-browser requests (mobile apps, curl, postman)
+    // Allow non-browser requests
     if (!origin) return cb(null, true);
 
     const allowedExact = [
@@ -50,27 +35,17 @@ app.register(cors, {
       'http://localhost:4173',
       'http://localhost:3000',
       'https://vetnexuspro.vercel.app', 
-      // Handle potential trailing slash issues in env var
       process.env.CLIENT_URL?.replace(/\/$/, '') 
     ].filter(Boolean);
 
-    // Check Exact Match
-    if (allowedExact.includes(origin)) {
-      return cb(null, true);
-    }
+    if (allowedExact.includes(origin)) return cb(null, true);
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
 
-    // Allow ALL Vercel Preview/Deployment URLs
-    if (origin.endsWith('.vercel.app')) {
-      return cb(null, true);
-    }
-
-    // Dev Mode Fallback
     if (process.env.NODE_ENV !== 'production') {
       app.log.warn(`⚠️ Dev CORS Allowed: ${origin}`);
       return cb(null, true);
     }
 
-    // Block others
     app.log.warn(`🚫 Blocked CORS request from: ${origin}`);
     return cb(new Error("Not allowed by CORS"), false);
   },
@@ -87,16 +62,12 @@ app.register(cookie, {
 });
 
 // --- REGISTER ROUTES ---
-// We wrap this in a plugin context to prefix everything with /api
 app.register(async (api) => {
-    
-    // 1. Health Check (Simple ping)
+    // 1. Health Check
     api.get('/health', async () => { return { status: 'ok', timestamp: new Date() } });
 
-    // 2. Register the SINGLE route file
-    // This function handles /auth, /admin, /users, /owners, /patients, /clinical, /inventory, /ai, /portal
+    // 2. Main Routes
     await api.register(appRoutes);
-
 }, { prefix: '/api' });
 
 
@@ -111,7 +82,6 @@ const start = async () => {
     app.log.info("✅ Connected to Database");
 
     // 2. Seed Plans
-    // Ensures basic subscription plans exist
     if (DEFAULT_PLANS && DEFAULT_PLANS.length > 0) {
       for (const p of DEFAULT_PLANS) {
           await prisma.plan.upsert({ where: { id: p.id }, update: p, create: p });
@@ -119,7 +89,7 @@ const start = async () => {
       app.log.info("✅ Plans Seeded");
     }
 
-    // 3. Seed System Tenant (The 'host' tenant)
+    // 3. Seed System Tenant
     const systemTenant = await prisma.tenant.upsert({ 
         where: { id: 'system' }, 
         update: {}, 
