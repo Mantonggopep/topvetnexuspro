@@ -80,7 +80,6 @@ const App: React.FC = () => {
             const { data } = await AuthService.getMe();
             
             if (data && data.user && data.tenant) {
-                // Login Success: Set User
                 setAppState(prev => ({
                     ...prev,
                     currentUser: data.user,
@@ -88,13 +87,11 @@ const App: React.FC = () => {
                     tenants: [data.tenant]
                 }));
 
-                // 3. Load Data only if not SuperAdmin
                 if (!data.user.roles.includes('SuperAdmin')) {
                     await fetchAllData();
                 }
             }
         } catch (e) {
-            // 401 Expected if not logged in - Do nothing, just stop loading
             console.log("User not logged in");
         } finally {
             setIsLoading(false);
@@ -155,10 +152,7 @@ const App: React.FC = () => {
   const handleLogin = async (email: string, password: string): Promise<boolean> => {
       setIsLoading(true);
       try {
-          // api.ts handles the token saving now
-          // We just need to fetch the user state
           const { data } = await AuthService.getMe();
-          
           setAppState(prev => ({
               ...prev,
               currentUser: data.user,
@@ -210,13 +204,6 @@ const App: React.FC = () => {
   };
   
   // --- HANDLERS ---
-
-  // ✅ ADDED THIS MISSING FUNCTION
-  const handlePatientSelect = (id: string) => {
-      setSelectedPatientId(id);
-      setCurrentView('patients');
-  };
-
   const handleAddPatient = async (petData: any) => withLoading(async () => {
       const { data } = await PatientService.create(petData);
       setAppState(prev => ({ ...prev, pets: [...prev.pets, data] }));
@@ -314,6 +301,14 @@ const App: React.FC = () => {
       }));
   }, 'Settings saved');
   
+  // --- NAVIGATION HANDLERS ---
+  
+  // ✅ DEFINED HERE: This was missing in your build!
+  const handlePatientSelect = (id: string) => {
+      setSelectedPatientId(id);
+      setCurrentView('patients');
+  };
+
   const handleUpdateTicket = () => {};
   const handleTransferStaff = () => {};
   const handleUpdateProfile = () => {};
