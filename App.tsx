@@ -80,6 +80,7 @@ const App: React.FC = () => {
             const { data } = await AuthService.getMe();
             
             if (data && data.user && data.tenant) {
+                // Login Success: Set User
                 setAppState(prev => ({
                     ...prev,
                     currentUser: data.user,
@@ -87,11 +88,13 @@ const App: React.FC = () => {
                     tenants: [data.tenant]
                 }));
 
+                // 3. Load Data only if not SuperAdmin
                 if (!data.user.roles.includes('SuperAdmin')) {
                     await fetchAllData();
                 }
             }
         } catch (e) {
+            // 401 Expected if not logged in - Do nothing, just stop loading
             console.log("User not logged in");
         } finally {
             setIsLoading(false);
@@ -152,7 +155,10 @@ const App: React.FC = () => {
   const handleLogin = async (email: string, password: string): Promise<boolean> => {
       setIsLoading(true);
       try {
+          // api.ts handles the token saving now
+          // We just need to fetch the user state
           const { data } = await AuthService.getMe();
+          
           setAppState(prev => ({
               ...prev,
               currentUser: data.user,
@@ -301,14 +307,6 @@ const App: React.FC = () => {
       }));
   }, 'Settings saved');
   
-  // --- NAVIGATION HANDLERS ---
-  
-  // ✅ DEFINED HERE: This was missing in your build!
-  const handlePatientSelect = (id: string) => {
-      setSelectedPatientId(id);
-      setCurrentView('patients');
-  };
-
   const handleUpdateTicket = () => {};
   const handleTransferStaff = () => {};
   const handleUpdateProfile = () => {};
@@ -317,12 +315,11 @@ const App: React.FC = () => {
   // --- RENDER ---
   if (isLoading) return <LoadingScreen message="Initializing Vet Nexus..." />;
 
-  // Auth Screen
+  // ✅ CRITICAL FIX: If no user, Show Auth Screen immediately
   if (!appState.currentUser) {
       return <Auth onLogin={handleLogin} onSignup={handleSignup} plans={appState.subscriptionPlans} />;
   }
 
-  // Admin Dashboard
   if (appState.currentUser.roles.includes('SuperAdmin')) {
       return <SuperAdminDashboard appState={appState} onUpdateTenant={()=>{}} onCreateTenant={()=>{}} onUpdatePlan={handleUpdateSubscriptionPlan} onUpdateTicket={handleUpdateTicket} onLogout={handleLogout} />;
   }
@@ -398,13 +395,13 @@ const App: React.FC = () => {
             <PageTransition view={currentView}>
                 <div className="w-full max-w-full">
                     {currentView === 'dashboard' && <Dashboard state={appState} onNavigate={setCurrentView} onSelectPatient={handlePatientSelect} />}
-                    {currentView === 'patients' && <PatientList pets={appState.pets} owners={appState.owners} onSelectPatient={handlePatientSelect} onAddPatient={handleAddPatient}/>}
+                    {currentView === 'patients' && <PatientList pets={appState.pets} owners={appState.owners} onSelectPatient={(id) => { setSelectedPatientId(id); setCurrentView('patients'); }} onAddPatient={handleAddPatient}/>}
                     {currentView === 'patients' && selectedPatientId && (
                             <PatientDetail pet={appState.pets.find(p => p.id === selectedPatientId)!} onBack={() => setSelectedPatientId(null)} onAddNote={()=>{}} />
                     )}
                     {currentView === 'clients' && <Clients currency={currency} />}
                     {currentView === 'appointments' && <Appointments appointments={appState.appointments} pets={appState.pets} owners={appState.owners} onAddAppointment={handleAddAppointment} />}
-                    {currentView === 'treatments' && <Treatments activePatients={appState.pets} appointments={appState.appointments} consultations={appState.consultations} owners={appState.owners} settings={currentTenant.settings} plan={currentTenant.plan} onSelectPatient={handlePatientSelect} onAddConsultation={handleAddConsultation} onAddLabRequest={handleAddLabRequest} onAddPatient={handleAddPatient} />}
+                    {currentView === 'treatments' && <Treatments activePatients={appState.pets} appointments={appState.appointments} consultations={appState.consultations} owners={appState.owners} settings={currentTenant.settings} plan={currentTenant.plan} onSelectPatient={(id) => { setSelectedPatientId(id); setCurrentView('patients'); }} onAddConsultation={handleAddConsultation} onAddLabRequest={handleAddLabRequest} onAddPatient={handleAddPatient} />}
                     {currentView === 'inventory' && <Inventory items={appState.inventory} currency={currency} onAddItem={handleAddInventory} onUpdateItem={handleUpdateInventory} />}
                     {currentView === 'pos' && <POS sales={appState.sales} owners={appState.owners} settings={currentTenant.settings} inventory={appState.inventory} plan={currentTenant.plan} onSaveSale={handleSaveSale} onDeleteSale={handleDeleteSale} />}
                     {currentView === 'lab' && <Lab results={appState.labResults} pets={appState.pets} owners={appState.owners} onAddResult={handleAddLabRequest} onUpdateResult={handleUpdateLabResult} />}
@@ -416,7 +413,11 @@ const App: React.FC = () => {
             </PageTransition>
         </div>
         
-        <MobileNavbar currentView={currentView} onNavigate={setCurrentView} onOpenMenu={() => setIsSpotlightOpen(true)} />
+        {/* Mobile Nav is now hidden on desktop screens (md and up) */}
+        <div className="md:hidden">
+            <MobileNavbar currentView={currentView} onNavigate={setCurrentView} onOpenMenu={() => setIsSpotlightOpen(true)} />
+        </div>
+        
         <AIAssistant plan={currentTenant?.plan} />
       </main>
     </div>
