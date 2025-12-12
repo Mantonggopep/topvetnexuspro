@@ -36,8 +36,9 @@
     @apply bg-white/60 backdrop-blur-lg border border-white/50 shadow-ios-md;
   }
 
+  /* FIXED: Changed /85 to /90 to match standard Tailwind classes */
   .glass-nav {
-    @apply bg-slate-900/85 backdrop-blur-2xl border border-white/10 shadow-ios-lg;
+    @apply bg-slate-900/90 backdrop-blur-2xl border border-white/10 shadow-ios-lg;
   }
 
   /* Safe Area for iPhone Home Indicator */

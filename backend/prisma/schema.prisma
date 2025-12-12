@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +10,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// 1. SYSTEM & TENANCY
+// ==========================================
+
 model Plan {
   id           String @id
   name         String
@@ -14,17 +21,6 @@ model Plan {
   priceYearly  Float
   features     String
   limits       String
-}
-
-model Log {
-  id        String   @id @default(uuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      String
-  action    String
-  type      String
-  details   String?
-  timestamp DateTime @default(now())
 }
 
 model Tenant {
@@ -38,6 +34,7 @@ model Tenant {
   joinedDate    DateTime @default(now())
   storageUsed   Float    @default(0)
 
+  // Relations
   users         User[]
   owners        Owner[]
   pets          Pet[]
@@ -50,7 +47,34 @@ model Tenant {
   logs          Log[]
   messages      Message[]
   clientUploads ClientUpload[]
+  branches      Branch[]
 }
+
+model Branch {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      String
+  action    String
+  type      String
+  details   String?
+  timestamp DateTime @default(now())
+}
+
+// ==========================================
+// 2. AUTHENTICATION & USERS
+// ==========================================
 
 model User {
   id           String  @id @default(uuid())
@@ -59,10 +83,13 @@ model User {
   name         String
   email        String  @unique
   passwordHash String
-  roles        String  @default("[\"Veterinarian\"]")
+  roles        String  @default("[\"Veterinarian\"]") // Stored as JSON string
   avatarUrl    String?
   isSuspended  Boolean @default(false)
-  isVerified   Boolean @default(false) 
+  isVerified   Boolean @default(false)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model VerificationToken {
@@ -76,6 +103,10 @@ model VerificationToken {
   @@unique([identifier, type])
 }
 
+// ==========================================
+// 3. CLIENTS & PATIENTS
+// ==========================================
+
 model Owner {
   id           String   @id @default(uuid())
   tenantId     String
@@ -86,18 +117,18 @@ model Owner {
   phone        String
   address      String?
   
-  // CLIENT PORTAL FEATURES
-  passwordHash   String?  // Allows client to log in
-  isPortalActive Boolean  @default(false) // Toggle access
+  // Portal Auth
+  passwordHash   String? 
+  isPortalActive Boolean  @default(false)
   lastLogin      DateTime?
 
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  pets         Pet[]
-  appointments Appointment[]
+  // Relations
+  pets          Pet[]
+  appointments  Appointment[]
   consultations Consultation[]
-  
-  // NEW RELATIONS
   sales         SaleRecord[]
   messages      Message[]
   uploads       ClientUpload[]
@@ -119,6 +150,7 @@ model Pet {
   color             String?
   imageUrl          String?
 
+  // Medical History (Stored as JSON Strings)
   vitalsHistory     String   @default("[]")
   notes             String   @default("[]")
   allergies         String   @default("[]")
@@ -127,11 +159,16 @@ model Pet {
   vaccinations      String   @default("[]")
 
   createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   appointments      Appointment[]
   consultations     Consultation[]
   labResults        LabResult[]
 }
+
+// ==========================================
+// 4. CLINICAL
+// ==========================================
 
 model Appointment {
   id         String   @id @default(uuid())
@@ -141,11 +178,15 @@ model Appointment {
   pet        Pet?     @relation(fields: [petId], references: [id])
   ownerId    String?
   owner      Owner?   @relation(fields: [ownerId], references: [id])
+  
   walkInName String?
   date       DateTime
   reason     String
   status     String   @default("Scheduled")
   doctorName String?
+  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model Consultation {
@@ -161,12 +202,14 @@ model Consultation {
   vetName             String
   status              String   @default("Draft")
 
+  // SOAP Notes & Data
   chiefComplaint      String?
   history             String?
   previousTreatmentId String?
   previousDiagnosis   String?
   plan                String?
 
+  // JSON Fields
   vitals              String   @default("{}")
   exam                String   @default("{}")
   diagnosis           String   @default("{}")
@@ -175,6 +218,9 @@ model Consultation {
   attachments         String   @default("[]")
   reminder            String   @default("{}")
   financials          String   @default("{}")
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model LabResult {
@@ -183,20 +229,32 @@ model LabResult {
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   petId          String?
   pet            Pet?      @relation(fields: [petId], references: [id])
+  
+  // Fields to match your routes.ts
+  type           String    @default("General") // Matches 'type' in code
+  date           DateTime  @default(now())     // Matches 'date' in code
+  
+  // Metadata
   patientName    String?
   ownerName      String?
   consultationId String?
-  testName       String
-  requestDate    DateTime  @default(now())
-  completionDate DateTime?
+  testName       String?   // Kept for backward compatibility
+  
   status         String    @default("Pending")
-  result         String?
+  result         String?   // Text or JSON
   resultUrl      String?
   notes          String?
   requestedBy    String?
   conductedBy    String?
   cost           Float     @default(0)
+
+  createdAt      DateTime  @default(now()) // Matches 'orderBy: createdAt' in code
+  updatedAt      DateTime  @updatedAt
 }
+
+// ==========================================
+// 5. INVENTORY & FINANCE
+// ==========================================
 
 model InventoryItem {
   id             String    @id @default(uuid())
@@ -217,6 +275,9 @@ model InventoryItem {
   location       String?
   batchNumber    String?
   supplier       String?
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model SaleRecord {
@@ -224,17 +285,19 @@ model SaleRecord {
   tenantId      String
   tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
-  // Linked Owner (for Portal History)
   ownerId       String?
   owner         Owner?   @relation(fields: [ownerId], references: [id])
 
+  // Walk-in Client Info
   clientId      String?
   clientName    String?
   clientAddress String?
   clientEmail   String?
   clientPhone   String?
+  
   date          DateTime @default(now())
 
+  // JSON Data
   items         String   @default("[]")
   payments      String   @default("[]")
 
@@ -247,6 +310,9 @@ model SaleRecord {
   invoiceNumber String?
   receiptNumber String?
   notes         String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Expense {
@@ -259,22 +325,23 @@ model Expense {
   amount        Float
   paymentMethod String
   notes         String?
+  createdAt     DateTime @default(now())
 }
 
-// NEW MODELS FOR CLIENT PORTAL
+// ==========================================
+// 6. CLIENT PORTAL EXTRAS
+// ==========================================
 
 model Message {
   id        String   @id @default(uuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   
-  // Context
   ownerId   String
   owner     Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   
-  // Who sent it?
   senderType String  // "Staff" or "Client"
-  senderId   String  // UserId or OwnerId (Client)
+  senderId   String  
   
   content    String
   isRead     Boolean @default(false)

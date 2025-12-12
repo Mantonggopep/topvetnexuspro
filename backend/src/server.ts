@@ -7,14 +7,13 @@ import { prisma } from './lib/prisma';
 import { DEFAULT_PLANS } from './utils/serverHelpers';
 
 // --- ROUTE IMPORT (Single File) ---
-// We import the single consolidated function we built in the previous step
 import { appRoutes } from './routes'; 
 
+// --- SERVER SETUP ---
+// ✅ UPDATED: Removed pino-pretty completely to fix Render crash. 
+// Uses standard JSON logging which is safer for production.
 const app: FastifyInstance = Fastify({ 
-  logger: {
-    level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
-    transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty' } : undefined
-  },
+  logger: { level: 'info' }, 
   // Keep the 10MB limit for file uploads/images
   bodyLimit: 1048576 * 10 
 });
@@ -36,8 +35,8 @@ app.register(cors, {
       'http://localhost:5173', 
       'http://localhost:4173',
       'http://localhost:3000',
+      'https://topvetnexuspro.vercel.app', // Adjusted to match your previous logs if needed
       'https://vetnexuspro.vercel.app', 
-      // Handle potential trailing slash issues in env var
       process.env.CLIENT_URL?.replace(/\/$/, '') 
     ].filter(Boolean);
 
