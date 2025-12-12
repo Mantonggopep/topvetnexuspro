@@ -7,14 +7,27 @@ import { prisma } from './lib/prisma';
 import { DEFAULT_PLANS } from './utils/serverHelpers';
 
 // --- ROUTE IMPORT (Single File) ---
-// We import the single consolidated function we built in the previous step
 import { appRoutes } from './routes'; 
 
+// --- LOGGER CONFIGURATION ---
+const isProduction = process.env.NODE_ENV === 'production';
+
+// In production, use default JSON logger (true). In dev, use pretty printing.
+const loggerConfig = isProduction
+  ? { level: 'info' } // Production: JSON logs, safer and faster
+  : {
+      level: 'info',
+      transport: {
+        target: 'pino-pretty',
+        options: {
+          translateTime: 'HH:MM:ss Z',
+          ignore: 'pid,hostname',
+        },
+      },
+    };
+
 const app: FastifyInstance = Fastify({ 
-  logger: {
-    level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
-    transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty' } : undefined
-  },
+  logger: loggerConfig,
   // Keep the 10MB limit for file uploads/images
   bodyLimit: 1048576 * 10 
 });
