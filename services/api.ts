@@ -179,8 +179,8 @@ export const SuperAdminService = {
 export const ClientPortalService = {
   login: (credentials: { email?: string, phone?: string, password: string }) => api.post('/portal/login', credentials),
   getDashboard: () => api.get('/portal/dashboard'),
+  getPets: () => api.get('/portal/pets'), // <--- Added this line to fix the build
   bookAppointment: (data: any) => api.post('/portal/appointments', data),
-  // These routes must be implemented in backend/routes.ts to work:
   getInvoices: () => api.get('/portal/invoices'),
   getMessages: () => api.get('/portal/messages'),
   sendMessage: (content: string) => api.post('/portal/messages', { content }),
