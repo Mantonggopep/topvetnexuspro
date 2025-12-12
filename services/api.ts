@@ -1,7 +1,8 @@
 import axios, { AxiosRequestConfig, AxiosError } from 'axios';
 
 // --- CONFIGURATION ---
-const PRODUCTION_API_URL = 'https://vetnexus-backend.onrender.com/api';
+// ✅ UPDATED: Points to your LIVE working backend
+const PRODUCTION_API_URL = 'https://topvetnexuspro.onrender.com/api';
 const LOCAL_API_URL = 'http://localhost:4000/api';
 
 // Robust environment detection
@@ -179,7 +180,7 @@ export const SuperAdminService = {
 export const ClientPortalService = {
   login: (credentials: { email?: string, phone?: string, password: string }) => api.post('/portal/login', credentials),
   getDashboard: () => api.get('/portal/dashboard'),
-  getPets: () => api.get('/portal/pets'), // <--- Added this line to fix the build
+  getPets: () => api.get('/portal/pets'), 
   bookAppointment: (data: any) => api.post('/portal/appointments', data),
   getInvoices: () => api.get('/portal/invoices'),
   getMessages: () => api.get('/portal/messages'),
